@@ -2,6 +2,7 @@ const express = require('express');
 const net = require('net');
 const http = require('http');
 const https = require('https');
+const dns = require('dns').promises;
 const fs = require('fs');
 const path = require('path');
 
@@ -162,6 +163,41 @@ function synFlood(target, port, duration, threads) {
 
   for (let i = 0; i < threads; i++) loop();
 }
+
+app.post('/api/resolve', async (req, res) => {
+  const { link } = req.body || {};
+  if (!link || typeof link !== 'string') {
+    return res.status(400).json({ error: 'no link provided' });
+  }
+
+  let host = link.trim();
+  host = host.replace(/^(https?|socks[45]|ftp):\/\//i, '');
+  host = host.split('/')[0].split('?')[0].split('#')[0];
+  host = host.split('@').pop();
+  host = host.split(':')[0];
+
+  if (!host || !/^[a-zA-Z0-9.-]+$/.test(host)) {
+    return res.status(400).json({ error: 'could not parse host from link' });
+  }
+
+  const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  if (isIp) {
+    return res.json({ host, ip: host, addresses: [{ address: host, family: 4 }] });
+  }
+
+  try {
+    const results = await dns.lookup(host, { all: true });
+    const addresses = results.map(r => ({ address: r.address, family: r.family }));
+    const primary = addresses.find(a => a.family === 4) || addresses[0];
+    return res.json({
+      host,
+      ip: primary ? primary.address : null,
+      addresses,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: `dns lookup failed: ${e.message}`, host });
+  }
+});
 
 app.post('/api/start', (req, res) => {
   const { target, port, method, duration, threads, useProxy } = req.body || {};
