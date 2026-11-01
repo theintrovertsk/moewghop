@@ -125,6 +125,40 @@
   #log p { margin: .2rem 0; word-break: break-word; }
   #log p.err { color: var(--accent); }
   #log p.warn { color: var(--warn); }
+  .target-row {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: .5rem;
+  }
+  .target-row input {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .target-row button {
+    width: auto;
+    padding: 0 .75rem;
+    background: #222;
+    color: var(--fg);
+    border: 1px solid #333;
+    font-size: .7rem;
+    letter-spacing: 1px;
+  }
+  .target-row button:hover {
+    background: #333;
+    color: var(--accent);
+  }
+  .target-row button:disabled {
+    background: #111;
+    color: #444;
+  }
+  .resolved-info {
+    font-size: .7rem;
+    color: var(--dim);
+    margin-bottom: 1rem;
+    min-height: 1em;
+    word-break: break-word;
+  }
+  .resolved-info b { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -141,7 +175,11 @@
   <input type="password" id="adminKey" placeholder="enter key">
 
   <label>target</label>
-  <input type="text" id="target" placeholder="example.com or 1.2.3.4">
+  <div class="target-row">
+    <input type="text" id="target" placeholder="example.com, 1.2.3.4, or paste a link">
+    <button type="button" id="resolveBtn">resolve</button>
+  </div>
+  <div id="resolvedInfo" class="resolved-info"></div>
 
   <div class="row">
     <div>
@@ -184,6 +222,9 @@
   const startBtn = document.getElementById('start');
   const proxyCountEl = document.getElementById('proxyCount');
   const runningCountEl = document.getElementById('runningCount');
+  const resolveBtn = document.getElementById('resolveBtn');
+  const resolvedInfo = document.getElementById('resolvedInfo');
+  const targetInput = document.getElementById('target');
   let active = false;
 
   function log(msg, cls) {
@@ -214,13 +255,61 @@
   setInterval(refreshStats, 5000);
   refreshStats();
 
+  resolveBtn.addEventListener('click', async () => {
+    const raw = targetInput.value.trim();
+    if (!raw) {
+      resolvedInfo.textContent = 'paste a link or hostname first';
+      return;
+    }
+
+    resolveBtn.disabled = true;
+    resolveBtn.textContent = '...';
+    resolvedInfo.textContent = 'resolving...';
+
+    try {
+      const r = await fetch(`${API_BASE}/api/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link: raw }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || `status ${r.status}`);
+      }
+      const d = await r.json();
+
+      if (d.ip) {
+        targetInput.value = d.ip;
+        const all = d.addresses.map(a => a.address).filter((v, i, s) => s.indexOf(v) === i).join(', ');
+        resolvedInfo.innerHTML = `resolved <b>${d.host}</b> -> <b>${d.ip}</b>` +
+          (d.addresses.length > 1 ? ` (${d.addresses.length} addresses: ${all})` : '');
+        log(`resolved ${d.host} -> ${d.ip}`);
+      } else {
+        resolvedInfo.textContent = `no A record for ${d.host}`;
+      }
+    } catch (e) {
+      resolvedInfo.textContent = `resolve error: ${e.message}`;
+      log(`resolve error: ${e.message}`, 'err');
+    } finally {
+      resolveBtn.disabled = false;
+      resolveBtn.textContent = 'resolve';
+    }
+  });
+
+  targetInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      resolveBtn.click();
+    }
+  });
+
   startBtn.addEventListener('click', async () => {
     if (active) return;
 
     const adminKey = document.getElementById('adminKey').value;
     if (!adminKey) { log('admin key required', 'err'); return; }
 
-    const target = document.getElementById('target').value.trim();
+    const target = targetInput.value.trim();
     if (!target) { log('target required', 'err'); return; }
 
     const payload = {
